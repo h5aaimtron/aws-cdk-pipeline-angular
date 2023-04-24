@@ -6,7 +6,7 @@ import { Artifact, Pipeline, StageOptions } from 'aws-cdk-lib/aws-codepipeline';
 import { BuildSpec, LinuxBuildImage, PipelineProject } from 'aws-cdk-lib/aws-codebuild';
 import { ARecord, HostedZone, RecordTarget } from 'aws-cdk-lib/aws-route53';
 import { DnsValidatedCertificate } from 'aws-cdk-lib/aws-certificatemanager';
-import { CloudFrontWebDistribution, ViewerCertificate } from 'aws-cdk-lib/aws-cloudfront';
+import { CloudFrontWebDistribution, OriginAccessIdentity, ViewerCertificate } from 'aws-cdk-lib/aws-cloudfront';
 import { CloudFrontTarget } from 'aws-cdk-lib/aws-route53-targets';
 import { CodeBuildStep, CodePipeline, CodePipelineFileSet } from 'aws-cdk-lib/pipelines';
 import { PolicyStatement } from 'aws-cdk-lib/aws-iam';
@@ -25,11 +25,11 @@ export class CdkStack extends cdk.Stack {
     const context: CDKContext = { ...globalConfig, ...envConfig };
     console.log(context);
 
-    // Define s3 bucket.
+    // Define s3 bucket. Removed PublicReadAccess: true as this will cause
+    // an error given S3 new default block all.
     const appBucket = new s3.Bucket(this, `${context.appName}-bucket`, {
       websiteIndexDocument: 'index.html',
       websiteErrorDocument: 'index.html',
-      publicReadAccess: true,
       removalPolicy: cdk.RemovalPolicy.DESTROY, // This flags S3 bucket to be destroyed when you want to tear down your infrastructure.
       autoDeleteObjects: true
     });
@@ -70,11 +70,17 @@ export class CdkStack extends cdk.Stack {
       responseCode: 200,
       responsePagePath: '/index.html',
     };
+
+    // Create Origin Access Identity and have s3 grant read access
+    const oai = new OriginAccessIdentity(this, `${context.appName}-${context.environment}-origin-access-id`, {});
+    appBucket.grantRead(oai);
+
     const distribution = new CloudFrontWebDistribution(this, `${context.appName}-web-distribution`, {
       originConfigs: [
         {
           s3OriginSource: {
             s3BucketSource: appBucket,
+            originAccessIdentity: oai
           },
           behaviors: [{ isDefaultBehavior: true }],
         },
